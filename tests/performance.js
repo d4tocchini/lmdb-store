@@ -56,12 +56,12 @@ console.log('opened')
 		}
 		return level.batch(operations)
 	})*/
-	test.only('lmdb-write', () => {
+	test('lmdb-write', () => {
 		let last
 		console.log('starting')
 		let cpuStart = process.cpuUsage()
 		let start = Date.now()
-		for (let i = 0; i < 100; i++) {
+		for (let i = 0; i < 10; i++) {
 			let start = Date.now()
 			let actionTime
 			let cpuStart = process.cpuUsage()

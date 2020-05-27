@@ -9,7 +9,8 @@
     "url": "http://github.com/DoctorEvidence/lmdb-store"
   },
   "scripts": {
-    "test": "./node_modules/.bin/mocha tests -u tdd"
+    "test": "mocha tests -u tdd",
+    "test-electron": "export PATH=\"/usr/local/d4/code/d4/pkg/@d4/app_darwin/master/The Grid.app/Contents/MacOS:${PATH}\" && npm run test"
   },
   "main": "./index.js",
   "typings": "./index.d.ts",
