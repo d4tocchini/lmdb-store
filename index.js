@@ -7,7 +7,8 @@ const when  = require('./util/when')
 const EventEmitter = require('events')
 
 const RANGE_BATCH_SIZE = 100
-const DEFAULT_SYNC_BATCH_THRESHOLD = 20000000
+const DEFAULT_SYNC_BATCH_THRESHOLD = 200000000 // 200MB
+const DEFAULT_IMMEDIATE_BATCH_THRESHOLD = 10000000 // 10MB
 const DEFAULT_COMMIT_DELAY = 20
 const AS_BINARY = {
 	keyIsBuffer: true
@@ -60,6 +61,7 @@ function open(path, options) {
 					this.db = env.openDbi({
 						name: dbName || null,
 						create: true,
+						txn: writeTxn,
 						keyIsBuffer: true,
 					})
 					this.db.name = dbName || null
@@ -75,6 +77,7 @@ function open(path, options) {
 			this.transactions = 0
 			this.averageTransactionTime = 5
 			this.syncBatchThreshold = DEFAULT_SYNC_BATCH_THRESHOLD
+			this.immediateBatchThreshold = DEFAULT_IMMEDIATE_BATCH_THRESHOLD
 			this.commitDelay = DEFAULT_COMMIT_DELAY
 			Object.assign(this, options)
 			allDbs.set(dbName ? name + '-' + dbName : name, this)
@@ -157,7 +160,7 @@ function open(path, options) {
 				this.reads++
 				return result
 			} catch(error) {
-				return handleError(error, this, txn, () => this.get(id, copy, shared))
+				return handleError(error, this, txn, () => this.get(id, copy))
 			}
 		}
 		put(id, value, ifValue) {
@@ -186,16 +189,10 @@ function open(path, options) {
 					value = Buffer.from(value)
 				}
 				this.writes++
-				let startCpu = process.cpuUsage()
-				let start = Date.now()
-
 				txn = writeTxn || env.beginTxn()
 				txn.putBinary(this.db, id, value)
-				/*if (Date.now() - start > 20)
-					console.log('after put', Date.now() - start, process.cpuUsage(startCpu))*/
 				if (!writeTxn) {
 					txn.commit()
-					//console.log('after commit', Date.now() - start, process.cpuUsage(startCpu))
 				}
 			} catch(error) {
 				if (writeTxn)
@@ -241,12 +238,10 @@ function open(path, options) {
 			return ifValue === undefined ? commit.unconditionalResults :
 				commit.results.then((writeResults) => writeResults[index] === 0)
 		}
-		iterable(options) {
-			console.warn('iterable is deprecated')
-			return this.getRange(options)
-		}
 		getRange(options) {
 			let iterable = new ArrayLikeIterable()
+			if (!options)
+				options = {}
 			let copy = options.copy
 			iterable[Symbol.iterator] = () => {
 				let currentKey = options.start || (options.reverse ? Buffer.from([255, 255]) : Buffer.from([0]))
@@ -257,9 +252,15 @@ function open(path, options) {
 				const getNextBlock = () => {
 					array = []
 					let cursor
+					let txn
 					try {
-						readTxn.renew()
-						cursor = new Cursor(readTxn, this.db)
+						if (writeTxn) {
+							txn = writeTxn
+						} else {
+							txn = readTxn
+							txn.renew()
+						}
+						cursor = new Cursor(txn, this.db)
 						if (reverse) {
 							// for reverse retrieval, goToRange is backwards because it positions at the key equal or *greater than* the provided key
 							let nextKey = cursor.goToRange(currentKey)
@@ -297,14 +298,17 @@ function open(path, options) {
 							currentKey = cursor[goToDirection]()
 						}
 						cursor.close()
-						readTxn.reset()
+						if (!writeTxn)
+							txn.reset()
 					} catch(error) {
 						if (cursor) {
 							try {
+								if (!writeTxn)
+									txn.reset()
 								cursor.close()
 							} catch(error) { }
 						}
-						return handleError(error, this, readTxn, getNextBlock)
+						return handleError(error, this, txn, getNextBlock)
 					}
 				}
 				let array
@@ -351,8 +355,10 @@ function open(path, options) {
 					when(currentCommit, () => {
 						let timeout = setTimeout(runNextBatch = (batchWriter) => {
 							runNextBatch = null
-							for (const store of stores) {
-								store.emit('beforecommit', { scheduledOperations })
+							if (pendingBatch) {
+								for (const store of stores) {
+									store.emit('beforecommit', { scheduledOperations })
+								}
 							}
 							clearTimeout(timeout)
 							currentCommit = whenCommitted
@@ -392,9 +398,10 @@ function open(path, options) {
 									reject(error)
 								}
 							} else {
-								resolve(results && results.length ? results : [])
+								resolve([])
 							}
 						}, this.commitDelay)
+						runNextBatch.timeout = timeout
 					})
 				})
 				pendingBatch = {
@@ -402,30 +409,36 @@ function open(path, options) {
 					unconditionalResults: whenCommitted.then(() => true) // for returning from non-conditional operations
 				}
 			}
-			if (scheduledOperations && scheduledOperations.bytes >= this.syncBatchThreshold && runNextBatch) {
-				// past a certain threshold, run it immediately and synchronously
-				let batch = pendingBatch
-				runNextBatch((operations, callback) => {
-					try {
-						callback(null, this.commitBatchNow(operations))
-					} catch (error) {
-						callback(error)
-					}
-				})
-				return batch
+			if (scheduledOperations && scheduledOperations.bytes >= this.immediateBatchThreshold && runNextBatch) {
+				if (scheduledOperations && scheduledOperations.bytes >= this.syncBatchThreshold) {
+					// past a certain threshold, run it immediately and synchronously
+					let batch = pendingBatch
+					clearImmediate(runNextBatch.immediate)
+					runNextBatch((operations, callback) => {
+						try {
+							callback(null, this.commitBatchNow(operations))
+						} catch (error) {
+							callback(error)
+						}
+					})
+					return batch
+				} else if (!runNextBatch.immediate) {
+					runNextBatch.immediate = setImmediate(runNextBatch)
+				}
 			}
 			return pendingBatch
 		}
 		commitBatchNow(operations) {
+			console.warn('Performing synchronous commit because over ' + this.syncBatchThreshold + ' bytes were included in one transaction, should run transactions over separate event turns to avoid this or increase syncBatchThreshold')
 			let value
 			let results = new Array(operations.length)
 			this.transaction(() => {
 				for (let i = 0, l = operations.length; i < l; i++) {
 					let [db, id, value, ifValue] = operations[i]
 					if (ifValue !== undefined) {
-						value = this.get(id)
+						let previousValue = this.get.call({ db }, id)
 						let matches
-						if (value) {
+						if (previousValue) {
 							if (ifValue) {
 								matches = value.length >= ifValue.length && value.slice(0, ifValue.length).equals(ifValue)
 							} else {
@@ -440,9 +453,9 @@ function open(path, options) {
 						}
 					}
 					if (value === undefined) {
-						results[i] = this.removeSync(id) ? 0 : 2
+						results[i] = this.removeSync.call({ db }, id) ? 0 : 2
 					} else {
-						this.putSync(id, value)
+						this.putSync.call({ db }, id, value)
 						results[i] = 0
 					}
 				}
@@ -556,8 +569,8 @@ function open(path, options) {
 				store.emit('remap')
 			}
 
+			console.log('Resizing database', name, 'to', newSize)
 			env.resize(newSize)
-			console.log('Resized database', name, 'to', newSize)
 			readTxn = env.beginTxn(READING_TNX)
 			readTxn.reset()
 			let result = retry()
