@@ -1,6 +1,6 @@
 const fs = require('fs-extra')
 const { extname, dirname, basename } = require('path')
-const { Env, openDbi, Cursor } = require('node-lmdb')
+const { Env, Cursor } = require('node-lmdb')
 const { ArrayLikeIterable } = require('./util/ArrayLikeIterable')
 //import { Database } from './Database'
 const when  = require('./util/when')
@@ -12,12 +12,12 @@ const DEFAULT_IMMEDIATE_BATCH_THRESHOLD = 10000000 // 10MB
 const DEFAULT_COMMIT_DELAY = 20
 const DEFAULT_MAX_DBS = 4;
 const DEFAULT_USE_WRITE_MAP = false; // provides better performance when true
-const AS_BINARY = {
-	keyIsBuffer: true
-}
-const AS_STRING = {
-	asBuffer: false
-}
+// const AS_BINARY = {
+// 	keyIsBuffer: true
+// }
+// const AS_STRING = {
+// 	asBuffer: false
+// }
 const READING_TNX = {
 	readOnly: true
 }
@@ -27,12 +27,11 @@ function genericErrorHandler(err) {
 		console.error(err)
 	}
 }
-let env
 exports.open = open
 function open(path, options) {
 	const extension = extname(path);
-	const dir = dirname(path);
 	const name = basename(path, extension);
+	const dir = dirname(path);
 	options && (options.path = path) || (options = {path});
 	options.hasOwnProperty("maxDbs") || (options.maxDbs = DEFAULT_MAX_DBS);
 	options.hasOwnProperty("noSubdir") || (options.noSubdir = (extension !== ''));
@@ -512,6 +511,7 @@ function open(path, options) {
 					justFreePages: false,
 					txn: writeTxn,
 				})
+				allDbs.delete
 			} catch(error) {
 				handleError(error, this, null, () => this.clear())
 			}
