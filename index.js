@@ -1,5 +1,5 @@
 const fs = require('fs-extra')
-const pathModule = require('path')
+const { extname, dirname, basename } = require('path')
 const { Env, openDbi, Cursor } = require('node-lmdb')
 const { ArrayLikeIterable } = require('./util/ArrayLikeIterable')
 //import { Database } from './Database'
@@ -30,27 +30,26 @@ function genericErrorHandler(err) {
 let env
 exports.open = open
 function open(path, options) {
-	const extension = pathModule.extname(path);
-	const dirname = pathModule.dirname(path);
-	const name = pathModule.basename(path, extension)
+	const extension = extname(path);
+	const dirname = dirname(path);
+	const name = basename(path, extension);
 	options && (options.path = path) || (options = {path});
 	options.hasOwnProperty("maxDbs") || (options.maxDbs = DEFAULT_MAX_DBS);
 	options.hasOwnProperty("noSubdir") || (options.noSubdir = (extension !== ''));
 	options.hasOwnProperty("useWritemap") || (options.maxDbs = DEFAULT_USE_WRITE_MAP);
 	if (!fs.existsSync(dirname))
-		fs.ensureDirSync(dirname)
+		fs.ensureDirSync(dirname);
 	if (options.clearOnStart) {
-		console.info('Removing', path)
-		fs.removeSync(path)
-		console.info('Removed', path)
+		console.info('Removing', path);
+		fs.removeSync(path);
+		console.info('Removed', path);
 	}
 	let env = new Env();
-	env.open(options)
-	// let committingWrites, scheduledWrites
-	let readTxn = env.beginTxn(READING_TNX)
-	readTxn.reset()
-	let writeTxn, scheduledOperations, pendingBatch, currentCommit, runNextBatch
-	let stores = []
+	env.open(options);
+	let readTxn = env.beginTxn(READING_TNX);
+	readTxn.reset();
+	let writeTxn, scheduledOperations, pendingBatch, currentCommit, runNextBatch;
+	let stores = [];
 	class LMDBStore extends EventEmitter {
 		constructor(dbName) {
 			super()
