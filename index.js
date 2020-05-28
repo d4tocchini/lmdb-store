@@ -31,14 +31,14 @@ let env
 exports.open = open
 function open(path, options) {
 	const extension = extname(path);
-	const dirname = dirname(path);
+	const dir = dirname(path);
 	const name = basename(path, extension);
 	options && (options.path = path) || (options = {path});
 	options.hasOwnProperty("maxDbs") || (options.maxDbs = DEFAULT_MAX_DBS);
 	options.hasOwnProperty("noSubdir") || (options.noSubdir = (extension !== ''));
 	options.hasOwnProperty("useWritemap") || (options.maxDbs = DEFAULT_USE_WRITE_MAP);
-	if (!fs.existsSync(dirname))
-		fs.ensureDirSync(dirname);
+	if (!fs.existsSync(dir))
+		fs.ensureDirSync(dir);
 	if (options.clearOnStart) {
 		console.info('Removing', path);
 		fs.removeSync(path);
