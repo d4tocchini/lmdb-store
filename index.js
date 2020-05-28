@@ -30,27 +30,26 @@ function genericErrorHandler(err) {
 let env
 exports.open = open
 function open(path, options) {
-	let env = new Env()
 	const extension = pathModule.extname(path);
-	options && (options.path = path) || (options = {path});	
+	const dirname = pathModule.dirname(path);
+	const name = pathModule.basename(path, extension)
+	options && (options.path = path) || (options = {path});
 	options.hasOwnProperty("maxDbs") || (options.maxDbs = DEFAULT_MAX_DBS);
 	options.hasOwnProperty("noSubdir") || (options.noSubdir = (extension !== ''));
 	options.hasOwnProperty("useWritemap") || (options.maxDbs = DEFAULT_USE_WRITE_MAP);
-	let committingWrites
-	let scheduledWrites
-	let scheduledOperations
-	let readTxn, writeTxn, pendingBatch, currentCommit, runNextBatch
-	let name = pathModule.basename(path, extension)
-	if (!fs.existsSync(pathModule.dirname(path)))
-		fs.ensureDirSync(pathModule.dirname(path))
-	if (options && options.clearOnStart) {
+	if (!fs.existsSync(dirname))
+		fs.ensureDirSync(dirname)
+	if (options.clearOnStart) {
 		console.info('Removing', path)
 		fs.removeSync(path)
 		console.info('Removed', path)
 	}
+	let env = new Env();
 	env.open(options)
-	readTxn = env.beginTxn(READING_TNX)
+	// let committingWrites, scheduledWrites
+	let readTxn = env.beginTxn(READING_TNX)
 	readTxn.reset()
+	let writeTxn, scheduledOperations, pendingBatch, currentCommit, runNextBatch
 	let stores = []
 	class LMDBStore extends EventEmitter {
 		constructor(dbName) {
