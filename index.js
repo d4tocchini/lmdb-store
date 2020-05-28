@@ -10,6 +10,8 @@ const RANGE_BATCH_SIZE = 100
 const DEFAULT_SYNC_BATCH_THRESHOLD = 200000000 // 200MB
 const DEFAULT_IMMEDIATE_BATCH_THRESHOLD = 10000000 // 10MB
 const DEFAULT_COMMIT_DELAY = 20
+const DEFAULT_MAX_DBS = 4;
+const DEFAULT_USE_WRITE_MAP = false; // provides better performance when true
 const AS_BINARY = {
 	keyIsBuffer: true
 }
@@ -29,21 +31,18 @@ let env
 exports.open = open
 function open(path, options) {
 	let env = new Env()
+	const extension = pathModule.extname(path);
+	options && (options.path = path) || (options = {path});	
+	options.hasOwnProperty("maxDbs") || (options.maxDbs = DEFAULT_MAX_DBS);
+	options.hasOwnProperty("noSubdir") || (options.noSubdir = (extension !== ''));
+	options.hasOwnProperty("useWritemap") || (options.maxDbs = DEFAULT_USE_WRITE_MAP);
 	let committingWrites
 	let scheduledWrites
 	let scheduledOperations
 	let readTxn, writeTxn, pendingBatch, currentCommit, runNextBatch
-	let extension = pathModule.extname(path)
 	let name = pathModule.basename(path, extension)
 	if (!fs.existsSync(pathModule.dirname(path)))
-    	fs.ensureDirSync(pathModule.dirname(path))
-	options = Object.assign({
-		path,
-		noSubdir: Boolean(extension),
-		maxDbs: 4,
-		//useWritemap: true, // this provides better performance
-	}, options)
-
+		fs.ensureDirSync(pathModule.dirname(path))
 	if (options && options.clearOnStart) {
 		console.info('Removing', path)
 		fs.removeSync(path)
